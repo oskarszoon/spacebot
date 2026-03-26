@@ -15,10 +15,11 @@ pub(crate) const RETRIGGER_DEBOUNCE_MS: u64 = 500;
 /// infinite retrigger cascades where each retrigger spawns more work.
 pub(crate) const MAX_RETRIGGERS_PER_TURN: usize = 3;
 
-/// Max LLM turns for retrigger relay. Retriggers are simple relay tasks —
-/// the LLM just needs to call the reply tool once. A low cap avoids wasting
-/// tokens on retries when the model struggles with the retrigger format.
-pub(crate) const RETRIGGER_MAX_TURNS: usize = 3;
+/// Max LLM turns for retrigger relay. Retriggers may need multiple tool
+/// calls: reply, send_file for artifacts, react_remove for cleanup, plus
+/// margin for model quirks. Previously 3, which caused truncated relays
+/// when the LLM spent turns on auxiliary tools before calling reply.
+pub(crate) const RETRIGGER_MAX_TURNS: usize = 6;
 
 #[derive(Debug, Clone)]
 pub(crate) enum TemporalTimezone {

@@ -911,16 +911,16 @@ impl Messaging for SlackAdapter {
             OutboundResponse::Text(text) => {
                 let thread_ts = extract_thread_ts(message);
 
-                for chunk in split_message(&text, 12_000) {
+                for chunk in split_message(&text, 3_500) {
                     let mut req = SlackApiChatPostMessageRequest::new(
                         channel_id.clone(),
                         markdown_content(chunk),
                     );
                     req = req.opt_thread_ts(thread_ts.clone());
-                    session
-                        .chat_post_message(&req)
-                        .await
-                        .context("failed to send slack message")?;
+                    session.chat_post_message(&req).await.map_err(|e| {
+                        tracing::error!(%e, "slack chat_post_message failed");
+                        anyhow::anyhow!("failed to send slack message: {e}")
+                    })?;
                 }
             }
             OutboundResponse::ThreadReply {
@@ -929,16 +929,16 @@ impl Messaging for SlackAdapter {
             } => {
                 let thread_ts = extract_thread_ts(message).or_else(|| extract_message_ts(message));
 
-                for chunk in split_message(&text, 12_000) {
+                for chunk in split_message(&text, 3_500) {
                     let mut req = SlackApiChatPostMessageRequest::new(
                         channel_id.clone(),
                         markdown_content(chunk),
                     );
                     req = req.opt_thread_ts(thread_ts.clone());
-                    session
-                        .chat_post_message(&req)
-                        .await
-                        .context("failed to send slack thread reply")?;
+                    session.chat_post_message(&req).await.map_err(|e| {
+                        tracing::error!(%e, "slack chat_post_message (thread reply) failed");
+                        anyhow::anyhow!("failed to send slack thread reply: {e}")
+                    })?;
                 }
             }
 
@@ -1092,8 +1092,8 @@ impl Messaging for SlackAdapter {
             OutboundResponse::StreamChunk(text) => {
                 let active = self.active_messages.read().await;
                 if let Some(ts) = active.get(&message.id) {
-                    let display_text = if text.len() > 12_000 {
-                        let end = text.floor_char_boundary(11_997);
+                    let display_text = if text.len() > 3_500 {
+                        let end = text.floor_char_boundary(3_497);
                         format!("{}...", &text[..end])
                     } else {
                         text
@@ -1144,7 +1144,7 @@ impl Messaging for SlackAdapter {
 
         match response {
             OutboundResponse::Text(text) => {
-                for chunk in split_message(&text, 12_000) {
+                for chunk in split_message(&text, 3_500) {
                     let mut req = SlackApiChatPostMessageRequest::new(
                         channel_id.clone(),
                         markdown_content(chunk),
@@ -1354,12 +1354,12 @@ fn parse_slack_history_timestamp(raw_timestamp: &str) -> Option<chrono::DateTime
 /// headings, quotes, links) natively — no mrkdwn conversion needed. The `text`
 /// field is set as fallback for notifications and accessibility.
 ///
-/// Cumulative limit for all markdown blocks in a payload is 12,000 characters.
-/// For content exceeding 12,000 chars we fall back to plain text to avoid
-/// Slack rejecting the payload.
+/// Cumulative limit for markdown blocks is nominally 12,000 characters,
+/// but in practice single blocks over ~4,000 characters are rejected.
+/// Use 3,500 as a safe ceiling; `split_message` handles chunking.
 fn markdown_content(text: impl Into<String>) -> SlackMessageContent {
     let text = text.into();
-    if text.len() <= 12_000 {
+    if text.len() <= 3_500 {
         let block = SlackBlock::Markdown(SlackMarkdownBlock::new(text.clone()));
         SlackMessageContent::new()
             .with_text(text)

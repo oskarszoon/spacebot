@@ -54,6 +54,9 @@ struct PendingResult {
     result: String,
     /// Whether the process completed successfully.
     success: bool,
+    /// Pinned inbound message from when this work was triggered,
+    /// so retrigger routing targets the correct Slack thread.
+    reply_target: Option<InboundMessage>,
 }
 
 const EVENT_LAG_WARNING_INTERVAL_SECS: u64 = 30;
@@ -2819,6 +2822,7 @@ impl Channel {
                         process_id: branch_id.to_string(),
                         result: conclusion.clone(),
                         success: true,
+                        reply_target: self.current_inbound.clone(),
                     });
                     should_retrigger = true;
 
@@ -2935,6 +2939,7 @@ impl Channel {
                         process_id: worker_id.to_string(),
                         result: result.clone(),
                         success: *success,
+                        reply_target: self.current_inbound.clone(),
                     });
                     should_retrigger = true;
                 }
@@ -2960,6 +2965,7 @@ impl Channel {
                     process_id: worker_id.to_string(),
                     result: result.clone(),
                     success: true,
+                    reply_target: self.current_inbound.clone(),
                 });
                 should_retrigger = true;
                 tracing::info!(
@@ -3124,6 +3130,17 @@ impl Channel {
             .iter()
             .map(|r| r.process_id.clone())
             .collect();
+
+        // Restore the thread context from when the work was triggered,
+        // so the retrigger reply routes to the correct Slack thread
+        // instead of whichever thread messaged most recently.
+        if let Some(pinned) = self
+            .pending_results
+            .iter()
+            .find_map(|r| r.reply_target.clone())
+        {
+            self.current_inbound = Some(pinned);
+        }
 
         let mut metadata = self.pending_retrigger_metadata.clone();
         metadata.insert(
